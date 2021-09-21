@@ -879,6 +879,8 @@ proc dialPeer*(node: Eth2Node, peerAddr: PeerAddr, index = 0) {.async.} =
     inc nbc_failed_dials
     node.addSeen(peerAddr.peerId, SeenTableTimeDeadPeer)
 
+proc trimConnections(node: Eth2Node, count: int) {.async, gcsafe.}
+
 proc connectWorker(node: Eth2Node, index: int) {.async.} =
   debug "Connection worker started", index = index
   while true:
@@ -888,8 +890,9 @@ proc connectWorker(node: Eth2Node, index: int) {.async.} =
     # Previous worker dial might have hit the maximum peers.
     # TODO: could clear the whole connTable and connQueue here also, best
     # would be to have this event based coming from peer pool or libp2p.
-    if node.switch.connManager.outSema.count > 0:
-      await node.dialPeer(remotePeerAddr, index)
+    while node.switch.connManager.outSema.count == 0:
+      await node.trimConnections(1)
+    await node.dialPeer(remotePeerAddr, index)
     # Peer was added to `connTable` before adding it to `connQueue`, so we
     # excluding peer here after processing.
     node.connTable.excl(remotePeerAddr.peerId)
@@ -1049,16 +1052,6 @@ proc runDiscoveryLoop*(node: Eth2Node) {.async.} =
             if peerAddr.peerId notin node.connTable:
               # We adding to pending connections table here, but going
               # to remove it only in `connectWorker`.
-
-              # If we are full, try to kick a peer (3 max)
-              for _ in 0..<3:
-                if node.peerPool.lenSpace({PeerType.Outgoing}) == 0 and newPeers == 0:
-                  await node.trimConnections(1)
-                else: break
-
-              if node.peerPool.lenSpace({PeerType.Outgoing}) == 0:
-                # No room anymore
-                break
 
               node.connTable.incl(peerAddr.peerId)
               await node.connQueue.addLast(peerAddr)

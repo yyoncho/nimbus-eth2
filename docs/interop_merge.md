@@ -1,3 +1,5 @@
+Nimbus passes phase 0, Altair, and Merge consensus spec tests in minimal and mainnet presets.
+
 # How to run Catalyst
 
 - Clone Geth: `git clone --branch merge-interop-spec https://github.com/MariusVanDerWijden/go-ethereum.git ~/execution-clients/go-ethereum`

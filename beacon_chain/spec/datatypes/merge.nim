@@ -36,11 +36,15 @@ type
   OpaqueTransaction* = List[byte, Limit MAX_BYTES_PER_OPAQUE_TRANSACTION]
   Transaction* = SingleMemberUnion[OpaqueTransaction]
 
+  # TODO rename ExecutionAddress
   EthAddress* = object
     data*: array[20, byte]  # TODO there's a network_metadata type, but the import hierarchy's inconvenient
 
   BloomLogs* = object
     data*: array[BYTES_PER_LOGS_BLOOM, byte]
+
+  # https://github.com/ethereum/execution-apis/blob/v1.0.0-alpha.1/src/engine/interop/specification.md#returns
+  PayloadId* = uint64
 
   # https://github.com/ethereum/consensus-specs/blob/v1.1.0-beta.4/specs/merge/beacon-chain.md#executionpayload
   ExecutionPayload* = object

@@ -23,4 +23,18 @@ Execution test vectors for Merge passed
 
 # Verify that Nimbus runs through the same examples
 
-- Run `./env.sh nim c -r tests/test_merge_vectors.nim`
+- Run `./env.sh nim c -r tests/test_merge_vectors.nim`. It should show output akin to:
+
+```
+[Suite] Merge test vectors
+DBG 2021-10-01 14:56:56.127+00:00 Message sent to RPC server                 topics="JSONRPC-HTTP-CLIENT" tid=354460 file=httpclient.nim:191 address=127.0.0.1:8545 msg_len=308
+DBG 2021-10-01 14:56:56.128+00:00 Message sent to RPC server                 topics="JSONRPC-HTTP-CLIENT" tid=354460 file=httpclient.nim:191 address=127.0.0.1:8545 msg_len=70
+DBG 2021-10-01 14:56:56.128+00:00 Message sent to RPC server                 topics="JSONRPC-HTTP-CLIENT" tid=354460 file=httpclient.nim:191 address=127.0.0.1:8545 msg_len=1193
+DBG 2021-10-01 14:56:56.129+00:00 Message sent to RPC server                 topics="JSONRPC-HTTP-CLIENT" tid=354460 file=httpclient.nim:191 address=127.0.0.1:8545 msg_len=172
+  [OK] preparePayload, getPayload, executePayload, and consensusValidated
+DBG 2021-10-01 14:56:56.129+00:00 Message sent to RPC server                 topics="JSONRPC-HTTP-CLIENT" tid=354460 file=httpclient.nim:191 address=127.0.0.1:8545 msg_len=74
+{"code":5,"message":"unknown payload"}
+  [OK] getPayload unknown payload
+DBG 2021-10-01 14:56:56.129+00:00 Message sent to RPC server                 topics="JSONRPC-HTTP-CLIENT" tid=354460 file=httpclient.nim:191 address=127.0.0.1:8545 msg_len=172
+  [OK] consensusValidated unknown header
+```

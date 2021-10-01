@@ -13,7 +13,7 @@ import
 suite "Merge test vectors":
   # Use 8545 here to get Geth directly, or 9545 to allow for the socat proxy
   let web3Provider = (waitFor newWeb3DataProvider(
-    default(Eth1Address), "http://127.0.0.1:9545")).get
+    default(Eth1Address), "http://127.0.0.1:8545")).get
 
   # These tests affect external execution client state, so have to be done in a
   # specific order and once done Geth must be reset via scripts/run-catalyst.sh

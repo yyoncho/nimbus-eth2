@@ -38,3 +38,36 @@ DBG 2021-10-01 14:56:56.129+00:00 Message sent to RPC server                 top
 DBG 2021-10-01 14:56:56.129+00:00 Message sent to RPC server                 topics="JSONRPC-HTTP-CLIENT" tid=354460 file=httpclient.nim:191 address=127.0.0.1:8545 msg_len=172
   [OK] consensusValidated unknown header
 ```
+
+# How to run Nimbus local testnet with Catalyst
+
+- Check out branch `amphora-merge-interop`
+- Run (and keep running) `./scripts/run-catalyst.sh`. It should look something like
+![./amphora_catalyst_run.png](./amphora_catalyst_run.png)
+
+
+- Run `./scripts/launch_local_testnet.sh --preset minimal --nodes 4 --disable-htop --stop-at-epoch 7 -- --verify-finalization --discv5:no`
+
+This creates a 4-node local testnet with 128 validators.
+
+The Nimbus console output will be similar to
+```
+NOT 2021-10-02 07:14:01.809+02:00 Generating deposits                        tid=695415 file=keystore_management.nim:441 totalNewValidators=128 validatorsDir=local_testnet_data/validators secretsDir=local_testnet_data/secrets
+NOT 2021-10-02 07:14:41.840+02:00 Deposit data written                       tid=695415 file=deposit_contract.nim:222 filename=local_testnet_data/deposits.json
+Wrote local_testnet_data/genesis.ssz
+{"lvl":"WRN","ts":"2021-10-02 07:14:41.849+02:00","msg":"Using insecure password to lock networking key","tid":695608,"file":"keystore_management.nim:372","key_path":"local_testnet_data/network_key.json"}
+{"lvl":"INF","ts":"2021-10-02 07:14:42.526+02:00","msg":"New network key storage was created","topics":"networking","tid":695608,"file":"eth2_network.nim:1763","key_path":"local_testnet_data/network_key.json","network_public_key":"0802122102cedeccf39e6a247b8911ccc01716befb1501546b3f7bc9c3c16dbea64de3b3f3"}
+Wrote local_testnet_data/bootstrap_nodes.txt
+Wrote local_testnet_data/config.yaml:
+PRESET_BASE: minimal
+MIN_GENESIS_ACTIVE_VALIDATOR_COUNT: 128
+MIN_GENESIS_TIME: 0
+GENESIS_DELAY: 10
+DEPOSIT_CONTRACT_ADDRESS: 0x0000000000000000000000000000000000000000
+ETH1_FOLLOW_DISTANCE: 1
+ALTAIR_FORK_EPOCH: 1
+MERGE_FORK_EPOCH: 2
+```
+
+Meanwhile, Nimbus is interacting with Geth/Catalyst in preparing, getting, executing, and marking as valid execution payloads:
+![./amphora_catalyst_logs.png](./amphora_catalyst_logs.png)

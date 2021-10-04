@@ -9,8 +9,7 @@
 
 import
   std/[macros, strutils, parseutils, tables],
-  stew/endians2,
-  web3/[ethtypes]
+  stew/endians2, stint, web3/[ethtypes]
 
 export
   toBytesBE
@@ -69,6 +68,9 @@ type
     DEPOSIT_CHAIN_ID*: uint64
     DEPOSIT_NETWORK_ID*: uint64
     DEPOSIT_CONTRACT_ADDRESS*: Eth1Address
+
+    TERMINAL_TOTAL_DIFFICULTY*: UInt256
+    TERMINAL_BLOCK_HASH*: BlockHash
 
   PresetFile* = object
     values*: Table[TaintedString, TaintedString]
@@ -143,12 +145,6 @@ const
     "DOMAIN_CONTRIBUTION_AND_PROOF",
 
     "CONFIG_NAME",
-
-    # Merge-related settings that are already part of the mainnet config:
-    "TERMINAL_TOTAL_DIFFICULTY",
-    "TERMINAL_BLOCK_HASH",
-
-    "TRANSITION_TOTAL_DIFFICULTY", # Name that appears in some altair alphas, obsolete, remove when no more testnets
   ]
 
 when const_preset == "mainnet":
@@ -366,6 +362,12 @@ template parse(T: type string, input: string): T =
 
 template parse(T: type Eth1Address, input: string): T =
   Eth1Address.fromHex(input)
+
+template parse(T: type BlockHash, input: string): T =
+  BlockHash.fromHex(input)
+
+template parse(T: type UInt256, input: string): T =
+  parse(input, UInt256, 10)
 
 proc readRuntimeConfig*(
     path: string): (RuntimeConfig, seq[string]) {.

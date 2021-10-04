@@ -13,7 +13,7 @@ import
 suite "Merge test vectors":
   # Use 8545 here to get Geth directly, or 9545 to allow for the socat proxy
   let web3Provider = (waitFor newWeb3DataProvider(
-    default(Eth1Address), "http://127.0.0.1:8550")).get
+    default(Eth1Address), "http://127.0.0.1:8545")).get
 
   test "preparePayload, getPayload, executePayload, and consensusValidated":
     let
@@ -27,8 +27,8 @@ suite "Merge test vectors":
       validatedStatus = waitFor web3Provider.consensusValidated(payload.blockHash, BlockValidationStatus.valid)
 
       payloadId2 = waitFor web3Provider.preparePayload(
-        Eth2Digest.fromHex("0xa217633b3c24112fe9b044b06b94a93d393a3ffd9e8765fecdb34063763d5135"),
-        5,  # Timestamp
+        payload.blockHash.asEth2Digest,
+        6,  # Timestamp
         default(Eth2Digest).data,  # Random
         Eth1Address.fromHex("0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b"))  # Fee recipient
       payload2 =         waitFor web3Provider.getPayload(Quantity(payloadId.payloadId))

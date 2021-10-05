@@ -418,66 +418,24 @@ func get_pow_block(pow_chain: openArray[PowBlock], parent_hash: Eth2Digest):
   err()
 
 # https://github.com/ethereum/consensus-specs/blob/v1.1.0/specs/merge/validator.md#executionpayload
-func get_pow_block_at_terminal_total_difficulty(pow_chain: openArray[PowBlock]):
-    Opt[PowBlock] =
-  # `pow_chain` abstractly represents all blocks in the PoW chain
-
-  const TERMINAL_TOTAL_DIFFICULTY = 0   # just first block
-
-  for blck in pow_chain:
-    when false:
-      let
-        parent = get_pow_block(pow_chain, blck.parent_hash)
-        block_reached_ttd = blck.total_difficulty >= TERMINAL_TOTAL_DIFFICULTY
-        parent_reached_ttd = parent.total_difficulty >= TERMINAL_TOTAL_DIFFICULTY
-      if block_reached_ttd and not parent_reached_ttd:
-        return blck
-    else:
-      return ok(blck)
-
-  err()
-
-func get_terminal_pow_block(pow_chain: openArray[PowBlock]): Opt[PowBlock] =
-  # supposedly part of mainnet config, maybe others
-  const TERMINAL_BLOCK_HASH = Eth2Digest()
-
-  if TERMINAL_BLOCK_HASH != Eth2Digest():
-    # Terminal block hash override takes precedence over terminal total
-    # difficulty
-    let pow_block_overrides = filterIt(pow_chain, it.block_hash == TERMINAL_BLOCK_HASH)
-    if pow_block_overrides.len == 0:
-      return err()
-    return ok(pow_block_overrides[0])
-
-  get_pow_block_at_terminal_total_difficulty(pow_chain)
-
 proc prepare_execution_payload(state: merge.BeaconState,
-                               pow_chain: seq[PowBlock],
+                               candidate_terminal_block_hash: seq[BlockHash],
                                fee_recipient: Address,
                                execution_engine: Web3DataProviderRef):
                                Future[Opt[PayloadId]] {.async.} =
-  when false:
-    # If pow_chain is openArray:
-    # Error: 'pow_chain' is of type <openArray[PowBlock]> which cannot be captured as it would violate memory safety
-    var parent_hash: Eth2Digest
-    if not is_merge_complete(state):
-      let terminal_pow_block = get_terminal_pow_block(pow_chain)
-      if terminal_pow_block.isErr():
-        # Pre-merge, no prepare payload call is needed
-        return err()
+  var parent_hash: Eth2Digest
+  if not is_merge_complete(state):
+    if candidate_terminal_block_hash == @[]:
+      # Pre-merge, no prepare payload call is needed
+      return err()
 
-      # Signify merge via producing on top of the terminal PoW block
-      parent_hash = terminal_pow_block.get.block_hash
-    else:
-      # Post-merge, normal payload
-      parent_hash = state.latest_execution_payload_header.block_hash
+    # Signify merge via producing on top of the terminal PoW block
+    parent_hash = candidate_terminal_block_hash[0].asEth2Digest
+  else:
+    # Post-merge, normal payload
+    parent_hash = state.latest_execution_payload_header.block_hash
 
   let
-    parent_hash =
-      if is_merge_complete(state):
-        state.latest_execution_payload_header.block_hash
-      else:
-        Eth2Digest.fromHex("0x3b8fb240d288781d4aac94d3fd16809ee413bc99294a085798a589dae51ddd4a")
     timestamp = compute_timestamp_at_slot(state, state.slot)
     random = get_randao_mix(state, get_current_epoch(state))
   return ok((await execution_engine.prepare_payload(
@@ -563,9 +521,14 @@ proc makeBeaconBlockForHeadAndSlot*(node: BeaconNode,
       if slot.epoch < node.dag.cfg.MERGE_FORK_EPOCH:
         default(merge.ExecutionPayload)
       else:
+        doAssert not (node.eth1Monitor.isNil)
         let
           payload_id = await prepare_execution_payload(
-            proposalState.data.hbsMerge.data, @[], default(Address),
+            proposalState.data.hbsMerge.data,
+            if node.eth1Monitor.terminalBlockHash.isSome:
+              @[node.eth1Monitor.terminalBlockHash.get]
+            else:
+              @[], default(Address),
             node.consensusManager.web3Provider)
           payload = await get_execution_payload(payload_id, node.consensusManager.web3Provider)
         payload,

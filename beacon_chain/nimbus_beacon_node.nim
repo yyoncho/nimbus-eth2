@@ -321,16 +321,13 @@ proc init*(T: type BeaconNode,
     dag.setTailState(checkpointState[], checkpointBlock)
 
   if eth1Monitor.isNil and
-     config.web3Urls.len > 0 and
-     genesisDepositsSnapshotContents.len > 0:
-    let genesisDepositsSnapshot = SSZ.decode(genesisDepositsSnapshotContents,
-                                             DepositContractSnapshot)
+     config.web3Urls.len > 0:
     eth1Monitor = Eth1Monitor.init(
       cfg,
       db,
       getBeaconTime,
       config.web3Urls,
-      genesisDepositsSnapshot,
+      DepositContractSnapshot(),
       eth1Network)
 
   let rpcServer = if config.rpcEnabled:

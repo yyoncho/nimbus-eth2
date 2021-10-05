@@ -30,7 +30,7 @@ echo \{\
 			\"period\": 5,\
 			\"epoch\": 30000\
 		\},\
-		\"terminalTotalDifficulty\":0\
+		\"terminalTotalDifficulty\":16\
 	\},\
 	\"nonce\":\"0x42\",\
 	\"timestamp\":\"0x0\",\
@@ -48,5 +48,7 @@ echo \{\
 	\"baseFeePerGas\":\"0x7\"\
 \} > ${GENESISJSON}
 
-~/execution_clients/go-ethereum/build/bin/geth --catalyst --http --ws -http.api "engine" --datadir ${GETHDATADIR} init ${GENESISJSON}
-~/execution_clients/go-ethereum/build/bin/geth --catalyst --http --ws -http.api "engine" --nodiscover --miner.etherbase 0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b --datadir ${GETHDATADIR} console
+GENESISJSON=/home/user/nimbus-eth2/scripts/genesis.json
+~/execution_clients/go-ethereum/build/bin/geth --catalyst --http --ws -http.api "engine" --datadir "${GETHDATADIR}" init "${GENESISJSON}"
+~/execution_clients/go-ethereum/build/bin/geth --catalyst --http --ws -http.api "engine" --datadir "${GETHDATADIR}" account import <(echo 45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8)
+~/execution_clients/go-ethereum/build/bin/geth --catalyst --http --ws -http.api "engine,eth" --miner.etherbase 0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b --datadir ${GETHDATADIR} --allow-insecure-unlock --unlock "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b" --password "" --nodiscover console

@@ -102,7 +102,7 @@ type
     lastReqTime*: Moment
     connections*: int
     enr*: Option[enr.Record]
-    metadata*: Option[phase0.MetaData]
+    metadata*: Option[altair.MetaData]
     lastMetadataTime*: Moment
     direction*: PeerType
     disconnectedFut: Future[void]
@@ -212,6 +212,11 @@ func phase0metadata*(node: Eth2Node): phase0.MetaData =
   phase0.MetaData(
     seq_number: node.metadata.seq_number,
     attnets: node.metadata.attnets)
+
+func toAltairMetadata*(phase0: phase0.MetaData): altair.MetaData =
+  altair.MetaData(
+    seq_number: phase0.seq_number,
+    attnets: phase0.attnets)
 
 const
   clientId* = "Nimbus beacon node " & fullVersionStr
@@ -1599,16 +1604,15 @@ proc updatePeerMetadata(node: Eth2Node, peerId: PeerID) {.async.} =
   #getMetaData can fail with an exception
   let newMetadata =
     try:
-      tryGet(await peer.getMetaData())
+      tryGet(await peer.getMetadata_v2())
     except CatchableError:
-      let metadataV2 =
-        try: tryGet(await peer.getMetadata_v2())
+      let metadataV1 =
+        try: tryGet(await peer.getMetaData())
         except CatchableError as exc:
           debug "Failed to retrieve metadata from peer!", peerId, msg=exc.msg
           return
 
-      phase0.MetaData(seq_number: metadataV2.seq_number,
-                      attnets: metadataV2.attnets)
+      toAltairMetadata(metadataV1)
 
   peer.metadata = some(newMetadata)
   peer.lastMetadataTime = Moment.now()

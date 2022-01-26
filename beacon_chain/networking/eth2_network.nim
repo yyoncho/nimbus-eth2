@@ -1007,11 +1007,11 @@ proc trimConnections(node: Eth2Node, count: int, maxScore = 0) {.async.} =
       scorePerMeshPeer = 10_000 div max(peersInMesh, 1)
       scorePerSubbedPeer = 1_000 div max(peersSubbed, 1)
 
-    for peer in node.pubsub.mesh[topic]:
+    for peer in node.pubsub.mesh.getOrDefault(topic):
       if peer.peerId notin scores: continue
       scores[peer.peerId] = scores[peer.peerId] + scorePerMeshPeer
 
-    for peer in node.pubsub.gossipsub[topic]:
+    for peer in node.pubsub.gossipsub.getOrDefault(topic):
       if peer.peerId notin scores: continue
       scores[peer.peerId] = scores[peer.peerId] + scorePerSubbedPeer
 
@@ -1026,7 +1026,12 @@ proc trimConnections(node: Eth2Node, count: int, maxScore = 0) {.async.} =
     if scores[peerId] > maxScore: return
 
     debug "kicking peer", peerId, score=scores[peerId]
-    await node.switch.disconnect(peerId)
+    try:
+      await node.switch.disconnect(peerId)
+    except CancelledError as exc:
+      raise exc
+    except CatchableError as exc:
+      debug "failed to kick peer", peerId, err=exc.msg
     dec toKick
     inc(nbc_cycling_kicked_peers)
     if toKick <= 0: return
@@ -1392,6 +1397,7 @@ proc startListening*(node: Eth2Node) {.async.} =
   await node.pubsub.start()
 
 proc peerPingerHeartbeat(node: Eth2Node): Future[void] {.gcsafe.}
+proc peerTrimmerHeartbeat(node: Eth2Node): Future[void] {.gcsafe.}
 
 proc start*(node: Eth2Node) {.async.} =
 
@@ -1417,6 +1423,7 @@ proc start*(node: Eth2Node) {.async.} =
         if pa.isOk():
           await node.connQueue.addLast(pa.get())
   node.peerPingerHeartbeatFut = node.peerPingerHeartbeat()
+  asyncSpawn node.peerTrimmerHeartbeat()
 
 proc stop*(node: Eth2Node) {.async.} =
   # Ignore errors in futures, since we're shutting down (but log them on the
@@ -1630,13 +1637,26 @@ proc peerPingerHeartbeat(node: Eth2Node) {.async.} =
         debug "no metadata from peer, kicking it", peer
         asyncSpawn peer.disconnect(PeerScoreLow)
 
+    await sleepAsync(5.seconds)
+
+proc peerTrimmerHeartbeat(node: Eth2Node) {.async.} =
+  while true:
     # Peer trimmer
     let excessPeers = len(node.peerPool) - node.wantedPeers
     if excessPeers > 0:
-      let toTrim = min(excessPeers, 10)
-      # 300 means that a peer will never be kicked if he
-      # is in mesh, or in a topic with less than 4 peers
-      await node.trimConnections(toTrim, maxScore = 300)
+      let
+        toTrim = min(excessPeers, 10)
+
+        maxScore =
+          if excessPeers > (node.wantedPeers div 2):
+            # We're above 75% of the hard-max, it's
+            # getting urgent to get rid of peers
+            int.high
+          else:
+            # 300 means that a peer will never be kicked if he
+            # is in mesh, or in a topic with less than 4 peers
+            300
+      await node.trimConnections(toTrim, maxScore)
 
     await sleepAsync(5.seconds)
 

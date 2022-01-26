@@ -23,7 +23,6 @@ import
   libp2p/protocols/pubsub/[
       pubsub, gossipsub, rpc/message, rpc/messages, peertable, pubsubpeer],
   libp2p/stream/connection,
-  libp2p/utils/semaphore,
   eth/[keys, async_utils], eth/p2p/p2p_protocol_dsl,
   eth/net/nat, eth/p2p/discoveryv5/[enr, node, random2],
   ".."/[version, conf, beacon_clock],
@@ -851,7 +850,11 @@ proc dialPeer*(node: Eth2Node, peerAddr: PeerAddr, index = 0) {.async.} =
 
   debug "Connecting to discovered peer"
   var deadline = sleepAsync(node.connectTimeout)
-  var workfut = node.switch.connect(peerAddr.peerId, peerAddr.addrs)
+  var workfut = node.switch.connect(
+    peerAddr.peerId,
+    peerAddr.addrs,
+    forceDial = true
+  )
 
   try:
     # `or` operation will only raise exception of `workfut`, because `deadline`
@@ -880,7 +883,9 @@ proc connectWorker(node: Eth2Node, index: int) {.async.} =
     # Previous worker dial might have hit the maximum peers.
     # TODO: could clear the whole connTable and connQueue here also, best
     # would be to have this event based coming from peer pool or libp2p.
-    if node.switch.connManager.outSema.count > 0:
+
+    # The hard peer limit is max-conns * 2
+    if node.peerPool.len < node.wantedPeers * 2:
       await node.dialPeer(remotePeerAddr, index)
     # Peer was added to `connTable` before adding it to `connQueue`, so we
     # excluding peer here after processing.
@@ -969,7 +974,7 @@ proc queryRandom*(
   d.rng[].shuffle(filtered)
   return filtered.sortedByIt(-it[0]).mapIt(it[1])
 
-proc trimConnections(node: Eth2Node, count: int) {.async.} =
+proc trimConnections(node: Eth2Node, count: int, maxScore = 0) {.async.} =
   # Kill `count` peers, scoring them to remove the least useful ones
 
   var scores = initOrderedTable[PeerID, int]()
@@ -1018,6 +1023,8 @@ proc trimConnections(node: Eth2Node, count: int) {.async.} =
   var toKick = count
 
   for peerId in scores.keys:
+    if scores[peerId] > maxScore: return
+
     debug "kicking peer", peerId, score=scores[peerId]
     await node.switch.disconnect(peerId)
     dec toKick
@@ -1109,39 +1116,20 @@ proc runDiscoveryLoop*(node: Eth2Node) {.async.} =
             np.add(peerAddr)
         np
 
-      # We have to be careful to kick enough peers to make room for new ones
-      # (If we are here, we have an unhealthy mesh, so if we're full, we have bad peers)
-      # But no kick too many peers because with low max-peers, that can cause disruption
-      # Also keep in mind that a lot of dial fails, and that we can have incoming peers waiting
-      let
-        roomRequired = 1 + newPeers.len()
-        roomCurrent = node.peerPool.lenSpace({PeerType.Outgoing})
-        roomDelta = roomRequired - roomCurrent
-
-        maxPeersToKick = len(node.peerPool) div 5
-        peersToKick = min(roomDelta, maxPeersToKick)
-
-      if peersToKick > 0 and newPeers.len() > 0:
-        await node.trimConnections(peersToKick)
-
       for peerAddr in newPeers:
           # We adding to pending connections table here, but going
           # to remove it only in `connectWorker`.
           node.connTable.incl(peerAddr.peerId)
           await node.connQueue.addLast(peerAddr)
 
-      debug "Discovery tick", wanted_peers = node.wantedPeers,
-            space = node.peerPool.shortLogSpace(),
-            acquired = node.peerPool.shortLogAcquired(),
-            available = node.peerPool.shortLogAvailable(),
-            current = node.peerPool.shortLogCurrent(),
-            length = len(node.peerPool),
+      debug "Discovery tick",
+            wanted_peers = node.wantedPeers,
+            current_peers = len(node.peerPool),
             discovered_nodes = len(discoveredNodes),
-            kicked_peers = max(0, peersToKick),
             new_peers = len(newPeers)
 
       if len(newPeers) == 0:
-        let currentPeers = node.peerPool.lenCurrent()
+        let currentPeers = len(node.peerPool)
         if currentPeers <= node.wantedPeers shr 2: #  25%
           warn "Peer count low, no new peers discovered",
             discovered_nodes = len(discoveredNodes), new_peers = newPeers,
@@ -1322,7 +1310,7 @@ proc new*(T: type Eth2Node, config: BeaconNodeConf, runtimeCfg: RuntimeConfig,
     pubsub: pubsub,
     wantedPeers: config.maxPeers,
     cfg: runtimeCfg,
-    peerPool: newPeerPool[Peer, PeerID](maxPeers = config.maxPeers),
+    peerPool: newPeerPool[Peer, PeerID](),
     # Its important here to create AsyncQueue with limited size, otherwise
     # it could produce HIGH cpu usage.
     connQueue: newAsyncQueue[PeerAddr](ConcurrentConnections),
@@ -1408,12 +1396,7 @@ proc peerPingerHeartbeat(node: Eth2Node): Future[void] {.gcsafe.}
 proc start*(node: Eth2Node) {.async.} =
 
   proc onPeerCountChanged() =
-    trace "Number of peers has been changed",
-          space = node.peerPool.shortLogSpace(),
-          acquired = node.peerPool.shortLogAcquired(),
-          available = node.peerPool.shortLogAvailable(),
-          current = node.peerPool.shortLogCurrent(),
-          length = len(node.peerPool)
+    trace "Number of peers has been changed", length = len(node.peerPool)
     nbc_peers.set int64(len(node.peerPool))
 
   node.peerPool.setPeerCounter(onPeerCountChanged)
@@ -1646,6 +1629,14 @@ proc peerPingerHeartbeat(node: Eth2Node) {.async.} =
       if heartbeatStart_m - lastMetadata > MetadataRequestMaxFailureTime:
         debug "no metadata from peer, kicking it", peer
         asyncSpawn peer.disconnect(PeerScoreLow)
+
+    # Peer trimmer
+    let excessPeers = len(node.peerPool) - node.wantedPeers
+    if excessPeers > 0:
+      let toTrim = min(excessPeers, 10)
+      # 300 means that a peer will never be kicked if he
+      # is in mesh, or in a topic with less than 4 peers
+      await node.trimConnections(toTrim, maxScore = 300)
 
     await sleepAsync(5.seconds)
 

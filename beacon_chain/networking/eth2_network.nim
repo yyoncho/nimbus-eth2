@@ -991,26 +991,24 @@ proc trimConnections(node: Eth2Node, count: int) {.async.} =
     scores[peer.peerId] = thisPeersScore
 
   # Split a 1000 points for each topic's peers
+  # + 10 000 points for each subbed topic
   # This gives priority to peers in topics with few peers
   # For instance, a topic with `dHigh` peers will give 80 points to each peer
   # Whereas a topic with `dLow` peers will give 250 points to each peer
   for topic, _ in node.pubsub.topics:
     let
-      peerCount = node.pubsub.mesh.peers(topic)
-      scorePerPeer = 1_000 div max(peerCount, 1)
-
-    if peerCount == 0: continue
+      peersInMesh = node.pubsub.mesh.peers(topic)
+      peersSubbed = node.pubsub.gossipsub.peers(topic)
+      scorePerMeshPeer = 10_000 div max(peersInMesh, 1)
+      scorePerSubbedPeer = 1_000 div max(peersSubbed, 1)
 
     for peer in node.pubsub.mesh[topic]:
       if peer.peerId notin scores: continue
+      scores[peer.peerId] = scores[peer.peerId] + scorePerMeshPeer
 
-      # Divide by the number of connections
-      # A peer using multiple connections is wasteful
-      let
-        connCount = node.switch.connmanager.connCount(peer.peerId)
-        thisPeersScore = scorePerPeer div max(1, connCount)
-
-      scores[peer.peerId] = scores[peer.peerId] + thisPeersScore
+    for peer in node.pubsub.gossipsub[topic]:
+      if peer.peerId notin scores: continue
+      scores[peer.peerId] = scores[peer.peerId] + scorePerSubbedPeer
 
   proc sortPerScore(a, b: (PeerID, int)): int =
     system.cmp(a[1], b[1])
@@ -1020,8 +1018,6 @@ proc trimConnections(node: Eth2Node, count: int) {.async.} =
   var toKick = count
 
   for peerId in scores.keys:
-    #TODO kill a single connection instead of the whole peer
-    # Not possible with the current libp2p's conn management
     debug "kicking peer", peerId, score=scores[peerId]
     await node.switch.disconnect(peerId)
     dec toKick

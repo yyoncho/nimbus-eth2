@@ -80,6 +80,7 @@ type
     peers*: Table[PeerID, Peer]
     validTopics: HashSet[string]
     peerPingerHeartbeatFut: Future[void]
+    peerTrimmerHeartbeatFut: Future[void]
     cfg: RuntimeConfig
     getBeaconTime: GetBeaconTimeFn
 
@@ -102,6 +103,7 @@ type
     connections*: int
     enr*: Option[enr.Record]
     metadata*: Option[altair.MetaData]
+    failedMetadataRequests: int
     lastMetadataTime*: Moment
     direction*: PeerType
     disconnectedFut: Future[void]
@@ -279,6 +281,15 @@ declareCounter nbc_failed_discoveries,
 
 declareCounter nbc_cycling_kicked_peers,
   "Number of peers kicked for peer cycling"
+
+declareGauge nbc_gossipsub_low_fanout,
+  "numbers of topics with low fanout"
+
+declareGauge nbc_gossipsub_good_fanout,
+  "numbers of topics with good fanout"
+
+declareGauge nbc_gossipsub_healthy_fanout,
+  "numbers of topics with dHigh fanout"
 
 const delayBuckets = [1.0, 5.0, 10.0, 20.0, 40.0, 60.0]
 
@@ -974,7 +985,7 @@ proc queryRandom*(
   d.rng[].shuffle(filtered)
   return filtered.sortedByIt(-it[0]).mapIt(it[1])
 
-proc trimConnections(node: Eth2Node, count: int, maxScore = 0) {.async.} =
+proc trimConnections(node: Eth2Node, count: int) {.async.} =
   # Kill `count` peers, scoring them to remove the least useful ones
 
   var scores = initOrderedTable[PeerID, int]()
@@ -1000,7 +1011,7 @@ proc trimConnections(node: Eth2Node, count: int, maxScore = 0) {.async.} =
   # This gives priority to peers in topics with few peers
   # For instance, a topic with `dHigh` peers will give 80 points to each peer
   # Whereas a topic with `dLow` peers will give 250 points to each peer
-  for topic, _ in node.pubsub.topics:
+  for topic, _ in node.pubsub.gossipsub:
     let
       peersInMesh = node.pubsub.mesh.peers(topic)
       peersSubbed = node.pubsub.gossipsub.peers(topic)
@@ -1023,8 +1034,6 @@ proc trimConnections(node: Eth2Node, count: int, maxScore = 0) {.async.} =
   var toKick = count
 
   for peerId in scores.keys:
-    if scores[peerId] > maxScore: return
-
     debug "kicking peer", peerId, score=scores[peerId]
     try:
       await node.switch.disconnect(peerId)
@@ -1043,6 +1052,10 @@ proc getLowSubnets(node: Eth2Node, epoch: Epoch): (AttnetBits, SyncnetBits) =
   # - Have 0 subscribed subnet below `dLow`
   # - Have 0 subscribed subnet below `dOut` outgoing peers
   # - Have 0 subnet with < `dHigh` peers from topic subscription
+
+  nbc_gossipsub_low_fanout.set(0)
+  nbc_gossipsub_good_fanout.set(0)
+  nbc_gossipsub_healthy_fanout.set(0)
 
   template findLowSubnets(topicNameGenerator: untyped,
                           SubnetIdType: type,
@@ -1072,6 +1085,14 @@ proc getLowSubnets(node: Eth2Node, epoch: Epoch): (AttnetBits, SyncnetBits) =
       let outPeers = node.pubsub.mesh.getOrDefault(topic).countIt(it.outbound)
       if outPeers < node.pubsub.parameters.dOut:
         belowDOutSubnets.setBit(subNetId)
+
+    nbc_gossipsub_low_fanout.inc(int64(lowOutgoingSubnets.countOnes()))
+    nbc_gossipsub_good_fanout.inc(int64(
+      notHighOutgoingSubnets.countOnes() -
+      lowOutgoingSubnets.countOnes()
+    ))
+    nbc_gossipsub_healthy_fanout.inc(int64(
+      totalSubnets - notHighOutgoingSubnets.countOnes()))
 
     if lowOutgoingSubnets.countOnes() > 0:
       lowOutgoingSubnets
@@ -1423,16 +1444,22 @@ proc start*(node: Eth2Node) {.async.} =
         if pa.isOk():
           await node.connQueue.addLast(pa.get())
   node.peerPingerHeartbeatFut = node.peerPingerHeartbeat()
-  asyncSpawn node.peerTrimmerHeartbeat()
+  node.peerTrimmerHeartbeatFut = node.peerTrimmerHeartbeat()
 
 proc stop*(node: Eth2Node) {.async.} =
   # Ignore errors in futures, since we're shutting down (but log them on the
   # TRACE level, if a timeout is reached).
+  var waitedFutures =
+    @[
+        node.switch.stop(),
+        node.peerPingerHeartbeat.cancelAndWait(),
+        node.peerTrimmerHeartbeatFut.cancelAndWait(),
+    ]
+
+  if node.discoveryEnabled:
+    waitedFutures &= node.discovery.closeWait()
+
   let
-    waitedFutures = if node.discoveryEnabled:
-                      @[node.discovery.closeWait(), node.switch.stop()]
-                    else:
-                      @[node.switch.stop()]
     timeout = 5.seconds
     completed = await withTimeout(allFutures(waitedFutures), timeout)
   if not completed:
@@ -1596,20 +1623,19 @@ proc updatePeerMetadata(node: Eth2Node, peerId: PeerID) {.async.} =
         try: tryGet(await peer.getMetaData())
         except CatchableError as exc:
           debug "Failed to retrieve metadata from peer!", peerId, msg=exc.msg
+          peer.failedMetadataRequests.inc()
           return
 
       toAltairMetadata(metadataV1)
 
   peer.metadata = some(newMetadata)
+  peer.failedMetadataRequests = 0
   peer.lastMetadataTime = Moment.now()
 
 const
   # For Phase0, metadata change every +27 hours
   MetadataRequestFrequency = 30.minutes
-
-  # Metadata request has 10 seconds timeout, and the loop sleeps for 5 seconds
-  # 50 seconds = 3 attempts
-  MetadataRequestMaxFailureTime = 50.seconds
+  MetadataRequestMaxFailures = 3
 
 proc peerPingerHeartbeat(node: Eth2Node) {.async.} =
   while true:
@@ -1623,17 +1649,12 @@ proc peerPingerHeartbeat(node: Eth2Node) {.async.} =
         heartbeatStart_m - peer.lastMetadataTime > MetadataRequestFrequency:
         updateFutures.add(node.updatePeerMetadata(peer.peerId))
 
-    discard await allFinished(updateFutures)
+    await allFutures(updateFutures)
 
     for peer in node.peers.values:
       if peer.connectionState != Connected: continue
-      let lastMetadata =
-        if peer.metadata.isNone:
-          peer.lastMetadataTime
-        else:
-          peer.lastMetadataTime + MetadataRequestFrequency
 
-      if heartbeatStart_m - lastMetadata > MetadataRequestMaxFailureTime:
+      if peer.failedMetadataRequests > MetadataRequestMaxFailures:
         debug "no metadata from peer, kicking it", peer
         asyncSpawn peer.disconnect(PeerScoreLow)
 
@@ -1644,19 +1665,11 @@ proc peerTrimmerHeartbeat(node: Eth2Node) {.async.} =
     # Peer trimmer
     let excessPeers = len(node.peerPool) - node.wantedPeers
     if excessPeers > 0:
-      let
-        toTrim = min(excessPeers, 10)
-
-        maxScore =
-          if excessPeers > (node.wantedPeers div 2):
-            # We're above 75% of the hard-max, it's
-            # getting urgent to get rid of peers
-            int.high
-          else:
-            # 300 means that a peer will never be kicked if he
-            # is in mesh, or in a topic with less than 4 peers
-            300
-      await node.trimConnections(toTrim, maxScore)
+      # We have to be careful, the score is not recomputed
+      # between kicks, so we must not kick too many peers at
+      # once
+      for _ in 0..<excessPeers div 2:
+        await node.trimConnections(2)
 
     await sleepAsync(5.seconds)
 

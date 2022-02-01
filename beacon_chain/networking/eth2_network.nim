@@ -895,8 +895,12 @@ proc connectWorker(node: Eth2Node, index: int) {.async.} =
     # TODO: could clear the whole connTable and connQueue here also, best
     # would be to have this event based coming from peer pool or libp2p.
 
-    # The hard peer limit is max-conns * 2
-    if node.peerPool.len < node.wantedPeers * 2:
+    # The hard peer limit is max-conns * 1.5
+    # otherwise, we may connect to too many peers at once
+    # and they will be in the grace period, meaning old
+    # peers will be kicked. Weird computation to stay
+    # in integer world
+    if node.peerPool.len < node.wantedPeers * 6 div 4:
       await node.dialPeer(remotePeerAddr, index)
     # Peer was added to `connTable` before adding it to `connQueue`, so we
     # excluding peer here after processing.
@@ -985,7 +989,7 @@ proc queryRandom*(
   d.rng[].shuffle(filtered)
   return filtered.sortedByIt(-it[0]).mapIt(it[1])
 
-proc trimConnections(node: Eth2Node, count: int) {.async.} =
+proc trimConnections(node: Eth2Node, count: int) =
   # Kill `count` peers, scoring them to remove the least useful ones
 
   var scores = initOrderedTable[PeerID, int]()
@@ -997,6 +1001,8 @@ proc trimConnections(node: Eth2Node, count: int) {.async.} =
   # have 640 points
   for peer in node.peers.values:
     if peer.connectionState != Connected: continue
+
+    # Metadata pinger is used as grace period
     if peer.metadata.isNone: continue
 
     let
@@ -1020,11 +1026,11 @@ proc trimConnections(node: Eth2Node, count: int) {.async.} =
 
     for peer in node.pubsub.mesh.getOrDefault(topic):
       if peer.peerId notin scores: continue
-      scores[peer.peerId] = scores[peer.peerId] + scorePerMeshPeer
+      scores[peer.peerId] = scores.getOrDefault(peer.peerId) + scorePerMeshPeer
 
     for peer in node.pubsub.gossipsub.getOrDefault(topic):
       if peer.peerId notin scores: continue
-      scores[peer.peerId] = scores[peer.peerId] + scorePerSubbedPeer
+      scores[peer.peerId] = scores.getOrDefault(peer.peerId) + scorePerSubbedPeer
 
   proc sortPerScore(a, b: (PeerID, int)): int =
     system.cmp(a[1], b[1])
@@ -1035,12 +1041,7 @@ proc trimConnections(node: Eth2Node, count: int) {.async.} =
 
   for peerId in scores.keys:
     debug "kicking peer", peerId, score=scores[peerId]
-    try:
-      await node.switch.disconnect(peerId)
-    except CancelledError as exc:
-      raise exc
-    except CatchableError as exc:
-      debug "failed to kick peer", peerId, err=exc.msg
+    asyncSpawn node.getPeer(peerId).disconnect(PeerScoreLow)
     dec toKick
     inc(nbc_cycling_kicked_peers)
     if toKick <= 0: return
@@ -1663,15 +1664,23 @@ proc peerPingerHeartbeat(node: Eth2Node) {.async.} =
 proc peerTrimmerHeartbeat(node: Eth2Node) {.async.} =
   while true:
     # Peer trimmer
-    let excessPeers = len(node.peerPool) - node.wantedPeers
+
+    # Only count Connected peers
+    # (to avoid counting Disconnecting ones)
+    var connectedPeers = 0
+    for peer in node.peers.values:
+      if peer.connectionState == Connected:
+        inc connectedPeers
+
+    let excessPeers = connectedPeers - node.wantedPeers
     if excessPeers > 0:
       # We have to be careful, the score is not recomputed
       # between kicks, so we must not kick too many peers at
       # once
       for _ in 0..<excessPeers div 2:
-        await node.trimConnections(2)
+        node.trimConnections(2)
 
-    await sleepAsync(5.seconds)
+    await sleepAsync(2.seconds)
 
 func asLibp2pKey*(key: keys.PublicKey): PublicKey =
   PublicKey(scheme: Secp256k1, skkey: secp.SkPublicKey(key))

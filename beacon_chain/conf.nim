@@ -446,7 +446,7 @@ type
       proposerBoosting* {.
         hidden
         desc: "Enable proposer boosting; temporary option feature gate (debugging; option will be removed)",
-        defaultValue: false
+        defaultValue: true
         name: "proposer-boosting-debug" }: bool
 
     of BNStartUpCmd.createTestnet:

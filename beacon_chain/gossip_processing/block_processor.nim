@@ -346,8 +346,11 @@ proc runQueueProcessingLoop*(self: ref BlockProcessor) {.async.} =
             blck.blck.bellatrixData.message.body.execution_payload !=
               default(bellatrix.ExecutionPayload):
           try:
+            # Minimize window for Eth1 monitor to shut down connection
+            await self.consensusManager.eth1Monitor.ensureDataProvider()
+
             await newExecutionPayload(
-              self.consensusManager.web3Provider,
+              self.consensusManager.eth1Monitor.dataProvider,
               blck.blck.bellatrixData.message.body.execution_payload)
           except CatchableError as err:
             info "runQueueProcessingLoop: newExecutionPayload failed",
@@ -396,9 +399,12 @@ proc runQueueProcessingLoop*(self: ref BlockProcessor) {.async.} =
       if  headBlockRoot      != default(Eth2Digest) and
           finalizedBlockRoot != default(Eth2Digest):
         try:
+          # Minimize window for Eth1 monitor to shut down connection
+          await self.consensusManager.eth1Monitor.ensureDataProvider()
+
           discard awaitWithTimeout(
             forkchoiceUpdated(
-              self.consensusManager.web3Provider, headBlockRoot,
+              self.consensusManager.eth1Monitor.dataProvider, headBlockRoot,
               finalizedBlockRoot),
             web3Timeout):
               info "runQueueProcessingLoop: forkchoiceUpdated timed out"

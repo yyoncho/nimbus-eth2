@@ -112,7 +112,7 @@ type
     depositContractAddress*: Eth1Address
     forcePolling: bool
 
-    dataProvider: Web3DataProviderRef
+    dataProvider*: Web3DataProviderRef  # TODO evidently not meant for export
     latestEth1Block: Option[FullBlockId]
 
     depositsChain: Eth1Chain
@@ -858,11 +858,6 @@ proc new*(T: type Web3DataProvider,
     ns = web3.contractSender(DepositContract, depositContractAddress)
 
   return ok Web3DataProviderRef(url: web3Url, web3: web3, ns: ns)
-
-# route around eth1 monitor initialization gating; intentionally a bit clunky
-proc newWeb3DataProvider*(depositContractAddress: Eth1Address, web3Url: string):
-    Future[Result[Web3DataProviderRef, string]] =
-  Web3DataProvider.new(depositContractAddress, web3Url)
 
 proc putInitialDepositContractSnapshot*(db: BeaconChainDB,
                                         s: DepositContractSnapshot) =

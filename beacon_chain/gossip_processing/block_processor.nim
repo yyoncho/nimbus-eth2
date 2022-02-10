@@ -12,7 +12,7 @@ import
   stew/results,
   eth/async_utils,
   chronicles, chronos, metrics,
-  ../spec/datatypes/[phase0, altair],
+  ../spec/datatypes/[phase0, altair, bellatrix],
   ../spec/[forks, signatures_batch],
   ../consensus_object_pools/[
     attestation_pool, block_clearance, blockchain_dag, block_quarantine,
@@ -298,7 +298,7 @@ proc runQueueProcessingLoop*(self: ref BlockProcessor) {.async.} =
         if  hasExecutionPayload and
             # Allow local testnets to run without requiring an execution layer
             blck.blck.mergeData.message.body.execution_payload !=
-              default(merge.ExecutionPayload):
+              default(bellatrix.ExecutionPayload):
           try:
             # Minimize window for Eth1 monitor to shut down connection
             await self.consensusManager.eth1Monitor.ensureDataProvider()

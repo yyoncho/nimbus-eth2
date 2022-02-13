@@ -88,6 +88,8 @@ if not defined(enableMarchNative):
       # supports instruction set extensions through SSE4.2 and POPCNT.
       switch("passC", "-march=nehalem")
       switch("passL", "-march=nehalem")
+    elif defined(i386):
+      discard
     else:
       switch("passC", "-mssse3")
       switch("passL", "-mssse3")

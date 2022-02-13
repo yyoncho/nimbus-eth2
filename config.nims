@@ -78,7 +78,7 @@ if defined(windows):
 # given its near-ubiquity in the x86 installed base, it renders a distribution
 # build more viable on an overall broader range of hardware.
 #
-if defined(disableMarchNative):
+if not defined(enableMarchNative):
   if defined(i386) or defined(amd64):
     if defined(macosx):
       # https://support.apple.com/kb/SP777
@@ -96,12 +96,8 @@ elif defined(macosx) and defined(arm64):
   switch("passC", "-mcpu=apple-a14")
   switch("passL", "-mcpu=apple-a14")
 else:
-  if defined(amd64) and not defined(macosx):
-    switch("passC", "-march=broadwell")
-    switch("passL", "-march=broadwell")
-  else:
-    switch("passC", "-march=native")
-    switch("passL", "-march=native")
+  switch("passC", "-march=native")
+  switch("passL", "-march=native")
   if defined(windows):
     # https://gcc.gnu.org/bugzilla/show_bug.cgi?id=65782
     # ("-fno-asynchronous-unwind-tables" breaks Nim's exception raising, sometimes)

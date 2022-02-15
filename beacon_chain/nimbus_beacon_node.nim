@@ -382,8 +382,8 @@ proc init*(T: type BeaconNode,
     chainDagFlags = if config.verifyFinalization: {verifyFinalization}
                      else: {}
     dag = ChainDAGRef.init(
-      cfg, db, validatorMonitor, chainDagFlags, onBlockAdded, onHeadChanged,
-      onChainReorg)
+      cfg, db, validatorMonitor, chainDagFlags, config.eraDir, onBlockAdded,
+      onHeadChanged, onChainReorg)
     quarantine = newClone(Quarantine.init())
     databaseGenesisValidatorsRoot =
       getStateField(dag.headState.data, genesis_validators_root)
@@ -522,6 +522,9 @@ proc init*(T: type BeaconNode,
   func getBackfillSlot(): Slot =
     dag.backfill.slot
 
+  func getFrontfillSlot(): Slot =
+    dag.frontfill.slot
+
   let
     slashingProtectionDB =
       SlashingProtectionDB.init(
@@ -552,11 +555,11 @@ proc init*(T: type BeaconNode,
     syncManager = newSyncManager[Peer, PeerID](
       network.peerPool, SyncQueueKind.Forward, getLocalHeadSlot,
       getLocalWallSlot, getFirstSlotAtFinalizedEpoch, getBackfillSlot,
-      dag.tail.slot, blockVerifier)
+      getFrontfillSlot, dag.tail.slot, blockVerifier)
     backfiller = newSyncManager[Peer, PeerID](
       network.peerPool, SyncQueueKind.Backward, getLocalHeadSlot,
       getLocalWallSlot, getFirstSlotAtFinalizedEpoch, getBackfillSlot,
-      dag.backfill.slot, blockVerifier, maxHeadAge = 0)
+      getFrontfillSlot, dag.backfill.slot, blockVerifier, maxHeadAge = 0)
 
   let stateTtlCache = if config.restCacheSize > 0:
     StateTtlCache.init(

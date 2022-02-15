@@ -448,21 +448,25 @@ proc cmdExportEra(conf: DbConf, cfg: RuntimeConfig) =
     tmp: seq[byte]
     timers: array[Timers, RunningStat]
 
-  var era = conf.era
-  while conf.eraCount == 0 or era < conf.era + conf.eraCount:
+  var era = Era(conf.era)
+  while conf.eraCount == 0 or era < Era(conf.era) + conf.eraCount:
     if shouldShutDown: quit QuitSuccess
+    # Era files hold the blocks for the "previous" era, and the first state in
+    # the era itself
     let
       firstSlot =
         if era == 0: none(Slot)
-        else: some(Slot((era - 1) * SLOTS_PER_HISTORICAL_ROOT))
-      endSlot = Slot(era * SLOTS_PER_HISTORICAL_ROOT)
+        else: some((era - 1).start_slot)
+      endSlot = era.start_slot
       canonical = dag.head.atCanonicalSlot(endSlot)
 
     if endSlot > dag.head.slot:
       echo "Written all complete eras"
       break
 
-    let name = withState(dag.headState.data): eraFileName(cfg, state.data, era)
+    let name = withState(dag.headState.data):
+      eraFileName(cfg, state.data.genesis_validators_root,
+      state.data.historical_roots.asSeq, era)
     if isFile(name):
       echo "Skipping ", name, " (already exists)"
     else:

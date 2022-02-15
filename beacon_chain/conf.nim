@@ -1007,6 +1007,10 @@ func databaseDir*(config: AnyConf): string =
 func runAsService*(config: BeaconNodeConf): bool =
   config.cmd == noCommand and config.runAsServiceFlag
 
+func eraDir*(config: AnyConf): string =
+  # TODO this should be shared between all instances of the same network
+  config.dataDir / "era"
+
 template writeValue*(writer: var JsonWriter,
                      value: TypedInputFile|InputFile|InputDir|OutPath|OutDir|OutFile) =
   writer.writeValue(string value)

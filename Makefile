@@ -251,6 +251,7 @@ build/generate_makefile: tools/generate_makefile.nim | deps-common
 # It also requires Make to pass open file descriptors to the GCC process,
 # which is not possible if we let Nim handle this, so we generate and use a
 # makefile instead.
+$(TOOLS): NIM_COMMIT=version-1-6
 $(TOOLS): | build deps
 	+ for D in $(TOOLS_DIRS); do [ -e "$${D}/$@.nim" ] && TOOL_DIR="$${D}" && break; done && \
 		echo -e $(BUILD_MSG) "build/$@" && \

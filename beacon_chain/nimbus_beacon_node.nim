@@ -1787,4 +1787,5 @@ programMain:
       config.trustedNodeUrl,
       config.blockId,
       config.backfillBlocks,
+      config.reindex,
       genesis)

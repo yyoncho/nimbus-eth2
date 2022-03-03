@@ -386,9 +386,75 @@ proc getLastNonEmptySlot*[T](sr: SyncResult[T]): Slot {.inline.} =
   else:
     sr.data[^1][].slot
 
+proc handlePotentialSafeSlotUpdate[T](sq: SyncQueue[T]) =
+  # It may happen that sync progress advanced to a newer `safeSlot`, either
+  # by a response that started with good values and only had errors late, or
+  # through an out-of-band mechanism, e.g., VC / REST.
+  # If that happens, advance to the new `safeSlot` to avoid repeating requests
+  # for data that is considered immutable and no longer relevant.
+  let
+    safeSlot = sq.getSafeSlot()
+    numSlotsAdvanced: uint64 =
+      case sq.kind
+      of SyncQueueKind.Forward:
+        if safeSlot > sq.outSlot:
+          safeSlot - sq.outSlot
+        else:
+          0
+      of SyncQueueKind.Backward:
+        if sq.outSlot > safeSlot:
+          sq.outSlot - safeSlot
+        else:
+          0
+  if numSlotsAdvanced != 0:
+    debug "Partially advancing sync progress",
+      slot_before = sq.outSlot, slot_after = safeSlot
+    sq.advanceOutput(numSlotsAdvanced)
+
 proc toDebtsQueue[T](sq: SyncQueue[T], sr: SyncRequest[T]) =
-  sq.debtsQueue.push(sr)
-  sq.debtsCount = sq.debtsCount + sr.count
+  if sr.count == 0 or sr.step == 0:
+    return
+
+  template enqueue(r: SyncRequest[T]) =
+    sq.debtsQueue.push(r)
+    sq.debtsCount = sq.debtsCount + r.count
+
+  let
+    outSlot = sq.outSlot
+    lowSlot = sr.slot
+    highSlot = lowSlot + sr.count * sr.step - 1
+  case sq.kind
+  of SyncQueueKind.Forward:
+    if outSlot <= lowSlot:
+      # Entire request is still relevant.
+      enqueue(sr)
+    elif outSlot <= highSlot:
+      # Request is only partially relevant.
+      var req = sr
+      let
+        numSlotsDone = outSlot - lowSlot
+        numStepsDone = (numSlotsDone + req.step - 1) div req.step
+      req.slot += numStepsDone * req.step
+      req.count -= numStepsDone
+      enqueue(req)
+    else:
+      # Entire request is no longer relevant.
+      discard
+  of SyncQueueKind.Backward:
+    if outSlot >= highSlot:
+      # Entire request is still relevant.
+      enqueue(sr)
+    elif outSlot >= lowSlot:
+      # Request is only partially relevant.
+      var req = sr
+      let
+        numSlotsDone = highSlot - outSlot
+        numStepsDone = (numSlotsDone + req.step - 1) div req.step
+      req.count -= numStepsDone
+      enqueue(req)
+    else:
+      # Entire request is no longer relevant.
+      discard
 
 proc getRewindPoint*[T](sq: SyncQueue[T], failSlot: Slot,
                         safeSlot: Slot): Slot =
@@ -641,6 +707,7 @@ proc push*[T](sq: SyncQueue[T], sr: SyncRequest[T],
             unviable = unviableBlock.isSome(),
             missing_parent = missingParentSlot.isSome()
       # We need to move failed response to the debts queue.
+      sq.handlePotentialSafeSlotUpdate()
       sq.toDebtsQueue(item.request)
 
       if unviableBlock.isSome:

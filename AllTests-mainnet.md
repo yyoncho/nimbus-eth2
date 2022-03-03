@@ -394,6 +394,7 @@ OK: 4/4 Fail: 0/4 Skip: 0/4
 + Process all unviable blocks                                                                OK
 + [SyncQueue#Backward] Async unordered push test                                             OK
 + [SyncQueue#Backward] Async unordered push with rewind test                                 OK
++ [SyncQueue#Backward] Good response with missing values towards end                         OK
 + [SyncQueue#Backward] Pass through established limits test                                  OK
 + [SyncQueue#Backward] Smoke test                                                            OK
 + [SyncQueue#Backward] Start and finish slots equal                                          OK
@@ -401,6 +402,7 @@ OK: 4/4 Fail: 0/4 Skip: 0/4
 + [SyncQueue#Backward] getRewindPoint() test                                                 OK
 + [SyncQueue#Forward] Async unordered push test                                              OK
 + [SyncQueue#Forward] Async unordered push with rewind test                                  OK
++ [SyncQueue#Forward] Good response with missing values towards end                          OK
 + [SyncQueue#Forward] Pass through established limits test                                   OK
 + [SyncQueue#Forward] Smoke test                                                             OK
 + [SyncQueue#Forward] Start and finish slots equal                                           OK
@@ -411,7 +413,7 @@ OK: 4/4 Fail: 0/4 Skip: 0/4
 + [SyncQueue] getLastNonEmptySlot() test                                                     OK
 + [SyncQueue] hasEndGap() test                                                               OK
 ```
-OK: 19/19 Fail: 0/19 Skip: 0/19
+OK: 21/21 Fail: 0/21 Skip: 0/21
 ## Zero signature sanity checks
 ```diff
 + SSZ serialization roundtrip of SignedBeaconBlockHeader                                     OK
@@ -513,4 +515,4 @@ OK: 1/1 Fail: 0/1 Skip: 0/1
 OK: 1/1 Fail: 0/1 Skip: 0/1
 
 ---TOTAL---
-OK: 282/287 Fail: 0/287 Skip: 5/287
+OK: 284/289 Fail: 0/289 Skip: 5/289

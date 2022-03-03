@@ -1,3 +1,10 @@
+# beacon_chain
+# Copyright (c) 2020-2022 Status Research & Development GmbH
+# Licensed and distributed under either of
+#   * MIT license (license terms in the root directory or at https://opensource.org/licenses/MIT).
+#   * Apache v2 license (license terms in the root directory or at https://www.apache.org/licenses/LICENSE-2.0).
+# at your option. This file may not be copied, modified, or distributed except according to those terms.
+
 {.used.}
 
 import std/strutils
@@ -417,6 +424,100 @@ suite "SyncManager test suite":
 
     check waitFor(runTest()) == true
 
+  template partialGoodResponseTest(kkind: SyncQueueKind, start, finish: Slot,
+                                   chunkSize: uint64) =
+    let aq = newAsyncQueue[BlockEntry]()
+
+    var counter =
+      case kkind
+      of SyncQueueKind.Forward:
+        int(start)
+      of SyncQueueKind.Backward:
+        int(finish)
+
+    proc backwardValidator(aq: AsyncQueue[BlockEntry]) {.async.} =
+      while true:
+        let sblock = await aq.popFirst()
+        if sblock.blck.slot == Slot(counter):
+          dec(counter)
+          sblock.done()
+        elif sblock.blck.slot < Slot(counter):
+          # There was a gap, report missing parent
+          sblock.fail(BlockError.MissingParent)
+        else:
+          sblock.fail(BlockError.Duplicate)
+
+    proc getBackwardSafeSlotCb(): Slot =
+      min((Slot(counter).epoch + 1).start_slot, finish)
+
+    proc forwardValidator(aq: AsyncQueue[BlockEntry]) {.async.} =
+      while true:
+        let sblock = await aq.popFirst()
+        if sblock.blck.slot == Slot(counter):
+          inc(counter)
+          sblock.done()
+        elif sblock.blck.slot > Slot(counter):
+          # There was a gap, report missing parent
+          sblock.fail(BlockError.MissingParent)
+        else:
+          sblock.fail(BlockError.Duplicate)
+
+    proc getFowardSafeSlotCb(): Slot =
+      max(Slot(max(counter, 1) - 1).epoch.start_slot, start)
+
+    var
+      queue =
+        case kkind
+        of SyncQueueKind.Forward:
+          SyncQueue.init(SomeTPeer, SyncQueueKind.Forward,
+                         start, finish, chunkSize,
+                         getFowardSafeSlotCb, collector(aq))
+        of SyncQueueKind.Backward:
+          SyncQueue.init(SomeTPeer, SyncQueueKind.Backward,
+                         finish, start, chunkSize,
+                         getBackwardSafeSlotCb, collector(aq))
+      chain = createChain(start, finish)
+      validatorFut =
+        case kkind
+        of SyncQueueKind.Forward:
+          forwardValidator(aq)
+        of SyncQueueKind.Backward:
+          backwardValidator(aq)
+
+    let p1 = SomeTPeer()
+
+    proc runTest() {.async.} =
+      while true:
+        var request = queue.pop(finish, p1)
+        if request.isEmpty():
+          break
+        var response = getSlice(chain, start, request)
+        if response.len >= (SLOTS_PER_EPOCH + 3).int:
+          # Create gap close to end of response, to simulate behaviour where
+          # the remote peer is sending valid data but does not have it fully
+          # available (e.g., still doing backfill after checkpoint sync)
+          case kkind
+          of SyncQueueKind.Forward:
+            response.delete(response.len - 2)
+          of SyncQueueKind.Backward:
+            response.delete(1)
+        if response.len >= 1:
+          # Ensure requested values are past `safeSlot`
+          case kkind
+          of SyncQueueKind.Forward:
+            check response[0][].slot >= getFowardSafeSlotCb()
+          else:
+            check response[^1][].slot <= getBackwardSafeSlotCb()
+        await queue.push(request, response)
+      await validatorFut.cancelAndWait()
+
+    waitFor runTest()
+    case kkind
+    of SyncQueueKind.Forward:
+      check (counter - 1) == int(finish)
+    of SyncQueueKind.Backward:
+      check (counter + 1) == int(start)
+
   for k in {SyncQueueKind.Forward, SyncQueueKind.Backward}:
     let prefix = "[SyncQueue#" & $k & "] "
 
@@ -444,6 +545,13 @@ suite "SyncManager test suite":
       ]
       for item in UnorderedTests:
         unorderedAsyncTest(k, item)
+
+    test prefix & "Good response with missing values towards end":
+      const PartialGoodResponseTests = [
+        (Slot(0), Slot(200), (SLOTS_PER_EPOCH + 3).uint64)
+      ]
+      for item in PartialGoodResponseTests:
+        partialGoodResponseTest(k, item[0], item[1], item[2])
 
   test "[SyncQueue#Forward] Async unordered push with rewind test":
     let

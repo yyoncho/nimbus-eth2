@@ -195,6 +195,12 @@ proc init*(T: type BeaconNode,
     fatal "--finalized-checkpoint-block cannot be specified without --finalized-checkpoint-state"
     quit 1
 
+  let jwtSecret = rng[].checkJwtSecret(string(config.dataDir), config.jwtSecret)
+  if jwtSecret.isErr:
+     fatal "Specified a JWT secret file which couldn't be loaded",
+       err = jwtSecret.error
+     quit 1
+
   template getDepositContractSnapshot: auto =
     if depositContractSnapshot.isSome:
       depositContractSnapshot
@@ -202,7 +208,8 @@ proc init*(T: type BeaconNode,
       let snapshotRes = waitFor createInitialDepositSnapshot(
         cfg.DEPOSIT_CONTRACT_ADDRESS,
         depositContractDeployedAt,
-        config.web3Urls[0])
+        config.web3Urls[0],
+        jwtSecret.get)
       if snapshotRes.isErr:
         fatal "Failed to locate the deposit contract deployment block",
               depositContract = cfg.DEPOSIT_CONTRACT_ADDRESS,
@@ -212,12 +219,6 @@ proc init*(T: type BeaconNode,
         some snapshotRes.get
     else:
       none(DepositContractSnapshot)
-
-  let jwtSecret = rng[].checkJwtSecret(string(config.dataDir), config.jwtSecret)
-  if jwtSecret.isErr:
-     fatal "Specified a JWT secret file which couldn't be loaded",
-       err = jwtSecret.error
-     quit 1
 
   var eth1Monitor: Eth1Monitor
   if not ChainDAGRef.isInitialized(db).isOk():
@@ -1628,11 +1629,18 @@ proc doCreateTestnet*(config: BeaconNodeConf, rng: var BrHmacDrbgContext) {.rais
   for i in 0 ..< launchPadDeposits.len:
     deposits.add(launchPadDeposits[i] as DepositData)
 
+  let jwtSecret = rng.checkJwtSecret(string(config.dataDir), config.jwtSecret)
+  if jwtSecret.isErr:
+     fatal "Specified a JWT secret file which couldn't be loaded",
+       err = jwtSecret.error
+     quit 1
+
   let
     startTime = uint64(times.toUnix(times.getTime()) + config.genesisOffset)
     outGenesis = config.outputGenesis.string
     eth1Hash = if config.web3Urls.len == 0: eth1BlockHash
-               else: (waitFor getEth1BlockHash(config.web3Urls[0], blockId("latest"))).asEth2Digest
+               else: (waitFor getEth1BlockHash(
+                 config.web3Urls[0], blockId("latest"), jwtSecret.get)).asEth2Digest
     cfg = getRuntimeConfig(config.eth2Network)
   var
     initialState = newClone(initialize_beacon_state_from_eth1(
@@ -1703,12 +1711,21 @@ proc doRecord(config: BeaconNodeConf, rng: var BrHmacDrbgContext) {.
   of RecordCmd.print:
     echo $config.recordPrint
 
-proc doWeb3Cmd(config: BeaconNodeConf) {.raises: [Defect, CatchableError].} =
+proc doWeb3Cmd(config: BeaconNodeConf, rng: var BrHmacDrbgContext) {.raises: [Defect, CatchableError].} =
   case config.web3Cmd:
   of Web3Cmd.test:
-    let metadata = config.loadEth2Network()
+    let
+      metadata = config.loadEth2Network()
+      jwtSecret = rng.checkJwtSecret(string(config.dataDir), config.jwtSecret)
+
+    if jwtSecret.isErr:
+      fatal "Specified a JWT secret file which couldn't be loaded",
+        err = jwtSecret.error
+      quit 1
+
     waitFor testWeb3Provider(config.web3TestUrl,
-                             metadata.cfg.DEPOSIT_CONTRACT_ADDRESS)
+                             metadata.cfg.DEPOSIT_CONTRACT_ADDRESS,
+                             jwtSecret.get)
 
 proc doSlashingExport(conf: BeaconNodeConf) {.raises: [IOError, Defect].}=
   let
@@ -1807,7 +1824,7 @@ programMain:
   of BNStartUpCmd.deposits: doDeposits(config, rng[])
   of BNStartUpCmd.wallets: doWallets(config, rng[])
   of BNStartUpCmd.record: doRecord(config, rng[])
-  of BNStartUpCmd.web3: doWeb3Cmd(config)
+  of BNStartUpCmd.web3: doWeb3Cmd(config, rng[])
   of BNStartUpCmd.slashingdb: doSlashingInterchange(config)
   of BNStartupCmd.trustedNodeSync:
     let

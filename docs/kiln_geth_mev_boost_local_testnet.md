@@ -56,7 +56,6 @@ This creates a 4-node local testnet with 128 validators.
 
 The Nimbus console output will be similar to
 ![./nimbus_localhost_run.png](./nimbus_localhost_run.png)
-The broken pipe on `tail` is normal, and unrelated to merge aspects of Nimbus.
 
 Meanwhile, Nimbus is interacting with Geth in preparing, getting, and executing payloads:
 ![./kiln_geth_logs.png](./kiln_geth_logs.png)

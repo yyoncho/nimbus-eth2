@@ -41,6 +41,8 @@ index 1ce023f..8c8df78 100644
 
 # Verify that Nimbus's RPC code can interact with Geth and mev-boost
 
+- Check out branch `kiln-mev-boost-test` of `nimbus-eth2`.
+
 - Run `./env.sh nim c -r scripts/test_merge_vectors.nim`. It should show output akin to:
 ![./kiln_geth_mev_boost_merge_test_vectors.png](./kiln_geth_mev_boost_merge_test_vectors.png)
 ![./kiln_geth_mev_boost_test_vectors_mev_boost.png](./kiln_geth_mev_boost_test_vectors_mev_boost.png)
@@ -48,7 +50,7 @@ index 1ce023f..8c8df78 100644
 
 # How to run Nimbus local testnet with Geth
 
-- Check out branch `kiln`
+- Check out branch `kiln-mev-boost-test` of `nimbus-eth2`.
 - Run (and keep running) `./scripts/run-catalyst.sh`.
 - Run `./scripts/launch_local_testnet.sh --preset minimal --nodes 4 --disable-htop --stop-at-epoch 7 -- --verify-finalization --discv5:no`
 

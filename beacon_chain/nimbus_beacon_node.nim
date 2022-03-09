@@ -1636,7 +1636,10 @@ proc doRunBeaconNode(config: var BeaconNodeConf, rng: ref BrHmacDrbgContext) {.r
   if bnStatus == BeaconNodeStatus.Stopping:
     return
 
-  initStatusBar(node)
+  when not defined(windows):
+    # This status bar can lock a Windows terminal emulator, blocking the whole
+    # event loop (seen on Windows 10, with a default MSYS2 terminal).
+    initStatusBar(node)
 
   if node.nickname != "":
     dynamicLogScope(node = node.nickname): node.start()

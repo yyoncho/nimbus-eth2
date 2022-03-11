@@ -1,0 +1,10 @@
+{
+    "nim.enableLsp": true,
+    "nim.rootConfig": [{
+            "root": "beacon_chain/nimbus_beacon_node.nim",
+            "regexps": [
+                "beacon_chain/.*\\.nim$"
+            ]
+        }
+    ]
+}

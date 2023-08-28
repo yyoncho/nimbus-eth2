@@ -12,6 +12,8 @@ author        = "Status Research & Development GmbH"
 description   = "The Nimbus beacon chain node is a highly efficient Ethereum 2.0 client"
 license       = "MIT or Apache License 2.0"
 
+installExt = @["nim", "yaml"]
+
 requires(
   "nim >= 1.6.12",
   "https://github.com/status-im/NimYAML",
